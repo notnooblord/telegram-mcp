@@ -17,7 +17,7 @@ def _md5(value: str) -> str:
     return hashlib.md5(value.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
-def test_http_session_md5_prefers_session_string(monkeypatch):
+def test_http_session_md5_uses_session_string_over_session_name(monkeypatch):
     monkeypatch.setattr(main, "SESSION_STRING", "string-session")
     monkeypatch.setattr(main, "TELEGRAM_SESSION_NAME", "file-session")
 

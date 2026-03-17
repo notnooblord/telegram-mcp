@@ -221,7 +221,8 @@ Get your API credentials at [my.telegram.org/apps](https://my.telegram.org/apps)
 
 If `HTTP_PORT` is set, the server starts MCP streamable HTTP transport on `/mcp` instead of stdio.
 Include `session_md5=<md5 of TELEGRAM_SESSION_STRING or TELEGRAM_SESSION_NAME>` in the query string
-when connecting.
+when connecting. By default it binds to `127.0.0.1`; set `HTTP_HOST=0.0.0.0` if you need to
+expose it outside the local machine or container.
 
 ---
 

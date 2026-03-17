@@ -146,11 +146,12 @@ TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 # Check if a string session exists in environment, otherwise use file-based session
 SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
 HTTP_PORT = int(os.getenv("HTTP_PORT")) if os.getenv("HTTP_PORT") else None
-HTTP_SESSION_QUERY_KEYS = ("session_md5", "sessionMd5", "session")
+HTTP_HOST = os.getenv("HTTP_HOST") or "127.0.0.1"
+HTTP_SESSION_QUERY_KEYS = ("session_md5", "sessionMd5")
 
 mcp = FastMCP(
     "telegram",
-    host="0.0.0.0" if HTTP_PORT is not None else "127.0.0.1",
+    host=HTTP_HOST,
     port=HTTP_PORT or 8000,
 )
 
