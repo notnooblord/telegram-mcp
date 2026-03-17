@@ -130,7 +130,7 @@ class _SessionMD5ProtectedASGIApp:
         if scope["type"] == "http" and not _is_http_session_query_authorized(
             scope.get("query_string", b"")
         ):
-            response = PlainTextResponse("Invalid session md5.", status_code=403)
+            response = PlainTextResponse("Unauthorized.", status_code=403)
             await response(scope, receive, send)
             return
 
