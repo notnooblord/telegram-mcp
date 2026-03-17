@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import hmac
 import os
 import sys
 import json
@@ -20,6 +22,8 @@ from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ToolAnnotations
 from mcp.shared.exceptions import McpError
 from pythonjsonlogger import jsonlogger
+from starlette.datastructures import QueryParams
+from starlette.responses import PlainTextResponse
 from telethon import TelegramClient, functions, types, utils
 from telethon.sessions import StringSession
 from telethon.tl.types import (
@@ -44,6 +48,7 @@ from telethon.tl.types import (
 import re
 from functools import wraps
 import telethon.errors.rpcerrorlist
+import uvicorn
 
 
 class ValidationError(Exception):
@@ -87,6 +92,51 @@ def get_entity_filter_type(entity: Any) -> Optional[str]:
     return None
 
 
+def _get_http_session_secret() -> Optional[str]:
+    """Return the configured session secret used to derive the HTTP query token."""
+    return SESSION_STRING or TELEGRAM_SESSION_NAME
+
+
+def _get_http_session_md5() -> Optional[str]:
+    """Return the md5 digest required for HTTP transport requests."""
+    session_secret = _get_http_session_secret()
+    if not session_secret:
+        return None
+    return hashlib.md5(session_secret.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def _is_http_session_query_authorized(query_string: bytes) -> bool:
+    """Validate the session md5 query parameter for HTTP transport requests."""
+    expected_session_md5 = _get_http_session_md5()
+    if expected_session_md5 is None:
+        return True
+
+    query_params = QueryParams(query_string)
+    for query_key in HTTP_SESSION_QUERY_KEYS:
+        provided_session_md5 = query_params.get(query_key)
+        if provided_session_md5 is not None:
+            return hmac.compare_digest(provided_session_md5, expected_session_md5)
+
+    return False
+
+
+class _SessionMD5ProtectedASGIApp:
+    """ASGI wrapper that rejects HTTP requests without the expected session md5."""
+
+    def __init__(self, app: Any):
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http" and not _is_http_session_query_authorized(
+            scope.get("query_string", b"")
+        ):
+            response = PlainTextResponse("Invalid session md5.", status_code=403)
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
 load_dotenv()
 
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID"))
@@ -95,8 +145,14 @@ TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 
 # Check if a string session exists in environment, otherwise use file-based session
 SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
+HTTP_PORT = int(os.getenv("HTTP_PORT")) if os.getenv("HTTP_PORT") else None
+HTTP_SESSION_QUERY_KEYS = ("session_md5", "sessionMd5", "session")
 
-mcp = FastMCP("telegram")
+mcp = FastMCP(
+    "telegram",
+    host="0.0.0.0" if HTTP_PORT is not None else "127.0.0.1",
+    port=HTTP_PORT or 8000,
+)
 
 if SESSION_STRING:
     # Use the string session if available
@@ -168,6 +224,26 @@ ROOTS_STATUS_NOT_CONFIGURED = "not_configured"
 ROOTS_STATUS_UNSUPPORTED_FALLBACK = "unsupported_fallback"
 ROOTS_STATUS_CLIENT_DENY_ALL = "client_deny_all"
 ROOTS_STATUS_ERROR = "error"
+
+
+def _build_streamable_http_app():
+    """Return the HTTP transport app, optionally wrapped with session md5 gating."""
+    streamable_http_app = mcp.streamable_http_app()
+    if _get_http_session_md5() is None:
+        return streamable_http_app
+    return _SessionMD5ProtectedASGIApp(streamable_http_app)
+
+
+async def _run_streamable_http_async() -> None:
+    """Run the streamable HTTP MCP transport."""
+    config = uvicorn.Config(
+        _build_streamable_http_app(),
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 # Error code prefix mapping for better error tracing
@@ -4697,8 +4773,16 @@ async def _main() -> None:
         await client.start()
 
         print("Telegram client started. Running MCP server...", file=sys.stderr)
-        # Use the asynchronous entrypoint instead of mcp.run()
-        await mcp.run_stdio_async()
+        if HTTP_PORT is not None:
+            print(
+                f"HTTP transport enabled on http://{mcp.settings.host}:{mcp.settings.port}/mcp "
+                "(requires session_md5 query parameter)",
+                file=sys.stderr,
+            )
+            await _run_streamable_http_async()
+        else:
+            # Use the asynchronous entrypoint instead of mcp.run()
+            await mcp.run_stdio_async()
     except Exception as e:
         print(f"Error starting client: {e}", file=sys.stderr)
         if isinstance(e, sqlite3.OperationalError) and "database is locked" in str(e):
