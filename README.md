@@ -214,8 +214,15 @@ TELEGRAM_API_ID=your_api_id_here
 TELEGRAM_API_HASH=your_api_hash_here
 TELEGRAM_SESSION_NAME=anon
 TELEGRAM_SESSION_STRING=your_session_string_here
+# Optional HTTP transport:
+# HTTP_PORT=8000
 ```
 Get your API credentials at [my.telegram.org/apps](https://my.telegram.org/apps).
+
+If `HTTP_PORT` is set, the server starts MCP streamable HTTP transport on `/mcp` instead of stdio.
+Include `session_md5=<md5 of TELEGRAM_SESSION_STRING or TELEGRAM_SESSION_NAME>` in the query string
+when connecting. By default it binds to `127.0.0.1`; set `HTTP_HOST=0.0.0.0` if you need to
+expose it outside the local machine or container.
 
 ---
 
